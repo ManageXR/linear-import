@@ -88,7 +88,14 @@ export class ClickupApiImporter implements Importer {
 
     const tasks = await this.fetchTasks();
     for (const task of tasks) {
-      const description = task.description || task.text_content || undefined;
+      const baseDescription = task.description || task.text_content || undefined;
+      const originalUrl = task.url;
+      const description =
+        originalUrl && baseDescription
+          ? `${baseDescription}\n\n[View original task in ClickUp](${originalUrl})`
+          : originalUrl
+            ? `[View original task in ClickUp](${originalUrl})`
+            : baseDescription;
       const statusName = this.mapStatus(task.status?.status);
       const priority = this.mapPriority(task.priority?.priority);
 
@@ -129,7 +136,7 @@ export class ClickupApiImporter implements Importer {
         description,
         status: statusName,
         priority,
-        url: task.url,
+        url: originalUrl,
         assigneeId: assignee ? (assignee.email || assignee.username)?.toLowerCase() : undefined,
         labels,
         createdAt: this.toDate(task.date_created),
