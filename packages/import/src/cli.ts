@@ -11,6 +11,7 @@ import { linearCsvImporter } from "./importers/linearCsv";
 import { pivotalCsvImport } from "./importers/pivotalCsv";
 import { shortcutCsvImport } from "./importers/shortcutCsv";
 import { trelloJsonImport } from "./importers/trelloJson";
+import { clickupImport } from "./importers/clickupCsv";
 import { ImportAnswers } from "./types";
 
 inquirer.registerPrompt("filePath", require("inquirer-file-path"));
@@ -60,6 +61,10 @@ inquirer.registerPrompt("filePath", require("inquirer-file-path"));
             name: "Linear (CSV export)",
             value: "linearCsv",
           },
+          {
+            name: "ClickUp (API)",
+            value: "clickup",
+          },
         ],
       },
     ]);
@@ -90,6 +95,9 @@ inquirer.registerPrompt("filePath", require("inquirer-file-path"));
         break;
       case "linearCsv":
         importer = await linearCsvImporter();
+        break;
+      case "clickup":
+        importer = await clickupImport();
         break;
       default:
         console.log(chalk.red(`Invalid importer`));
