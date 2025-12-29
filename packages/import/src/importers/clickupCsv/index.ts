@@ -16,6 +16,7 @@ export const clickupImport = async (): Promise<Importer> => {
     statusMapping,
     maxIssues: answers.maxIssues ?? 1,
     singleTaskId: answers.singleTaskId || undefined,
+    template: answers.useBugTemplate ? "bug" : "none",
   };
 
   return new ClickupApiImporter(importerOptions);
@@ -29,6 +30,7 @@ interface ClickupImportAnswers {
   statusMapping: string;
   maxIssues?: number;
   singleTaskId?: string;
+  useBugTemplate: boolean;
 }
 
 const questions = [
@@ -74,6 +76,12 @@ const questions = [
       'Optional status mapping (JSON, e.g. {"todo":"Backlog","in progress":"Started"}). Leave blank to use ClickUp statuses as-is:',
     default:
       '{"triage":"Triage","reviewed":"Backlog","up next":"Up Next","in progress":"In Development","fix in next release":"Done","fixed":"Released"}',
+  },
+  {
+    type: "confirm",
+    name: "useBugTemplate",
+    message: "Format description using the bug template?",
+    default: true,
   },
 ];
 

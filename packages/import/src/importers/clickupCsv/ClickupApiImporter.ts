@@ -69,6 +69,7 @@ export interface ClickupImporterOptions {
   maxIssues?: number;
   singleTaskId?: string;
   fetchImpl?: (url: string, init?: any) => Promise<any>;
+  template?: "bug" | "none";
 }
 
 /**
@@ -84,6 +85,7 @@ export class ClickupApiImporter implements Importer {
     this.maxIssues = options.maxIssues ?? 1;
     this.singleTaskId = options.singleTaskId;
     this.fetchImpl = (options.fetchImpl ?? fetch) as (url: string, init?: any) => Promise<any>;
+    this.template = options.template ?? "bug";
   }
 
   public get name(): string {
@@ -107,16 +109,6 @@ export class ClickupApiImporter implements Importer {
       const baseDescription = task.description || task.text_content || undefined;
       const originalUrl = task.url;
       const comments = await this.fetchComments(task.id);
-      const commentsBlock = this.formatComments(comments);
-
-      const description =
-        originalUrl && baseDescription
-          ? `${baseDescription}\n\n[View original task in ClickUp](${originalUrl})`
-          : originalUrl
-            ? `[View original task in ClickUp](${originalUrl})`
-            : baseDescription;
-      const fullDescription =
-        commentsBlock && description ? `${description}\n\n---\n\n${commentsBlock}` : commentsBlock || description;
       const statusName = this.mapStatus(task.status?.status);
       const priority = this.mapPriority(task.priority?.priority);
 
@@ -137,6 +129,14 @@ export class ClickupApiImporter implements Importer {
           name: this.labelForBoard,
         };
       }
+
+      const commentsBlock = this.formatComments(comments);
+      const fullDescription = this.buildDescription({
+        body: baseDescription,
+        originalUrl,
+        comments: commentsBlock,
+        labels,
+      });
 
       if (statusName && !importData.statuses?.[statusName]) {
         importData.statuses![statusName] = { name: statusName };
@@ -288,6 +288,142 @@ export class ClickupApiImporter implements Importer {
     return `### ClickUp comments\n\n${blocks.join("\n\n---\n\n")}`;
   }
 
+  private buildDescription({
+    body,
+    originalUrl,
+    comments,
+    labels,
+  }: {
+    body?: string;
+    originalUrl?: string;
+    comments?: string;
+    labels: string[];
+  }): string | undefined {
+    if (this.template === "bug") {
+      return this.renderBugTemplate({ body, originalUrl, comments, labels });
+    }
+
+    const description =
+      originalUrl && body
+        ? `${body}\n\n[View original task in ClickUp](${originalUrl})`
+        : originalUrl
+          ? `[View original task in ClickUp](${originalUrl})`
+          : body;
+    return comments && description ? `${description}\n\n---\n\n${comments}` : comments || description;
+  }
+
+  private renderBugTemplate({
+    body,
+    originalUrl,
+    comments,
+    labels,
+  }: {
+    body?: string;
+    originalUrl?: string;
+    comments?: string;
+    labels: string[];
+  }): string {
+    const sections = this.parseBodyIntoSections(body || "");
+
+    const ctxLines: string[] = [];
+    if (sections.context) ctxLines.push(sections.context);
+    if (originalUrl) ctxLines.push(`Original ClickUp: ${originalUrl}`);
+    if (labels.length) ctxLines.push(`Tags: ${labels.join(", ")}`);
+    if (comments) ctxLines.push(comments);
+
+    const renderSection = (title: string, content?: string) =>
+      `# ${title}\n${content && content.trim().length ? content.trim() : ""}`.trimEnd();
+
+    const parts = [
+      renderSection("Loom / Screenshots / Logs", sections.looms),
+      renderSection("Meta Workplace post (if n/a, leave blank)", sections.meta),
+      renderSection("Steps to Reproduce:", sections.steps),
+      renderSection("Actual Result:", sections.actual),
+      renderSection("Expected Result:", sections.expected),
+      renderSection("Known Workarounds (if any):", sections.workarounds),
+      renderSection("Occurring in Production?", sections.production),
+      renderSection("Context (if anything is n/a, leave blank)", ctxLines.join("\n\n")),
+    ];
+
+    return parts.join("\n\n\n");
+  }
+
+  private parseBodyIntoSections(body: string): {
+    looms?: string;
+    meta?: string;
+    steps?: string;
+    actual?: string;
+    expected?: string;
+    workarounds?: string;
+    production?: string;
+    context?: string;
+  } {
+    const buckets: Record<string, string[]> = {
+      looms: [],
+      meta: [],
+      steps: [],
+      actual: [],
+      expected: [],
+      workarounds: [],
+      production: [],
+      context: [],
+    };
+
+    const sectionMatchers: { key: keyof typeof buckets; regex: RegExp }[] = [
+      { key: "looms", regex: /loom|screenshot|log|recording/i },
+      { key: "steps", regex: /steps to reproduce|repro steps|steps/i },
+      { key: "actual", regex: /actual result|observed/i },
+      { key: "expected", regex: /expected result|expected/i },
+      { key: "workarounds", regex: /workaround/i },
+      { key: "production", regex: /production|prod\b/i },
+      { key: "context", regex: /context|notes?/i },
+    ];
+
+    let current: keyof typeof buckets | null = null;
+    const lines = body.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (current) buckets[current].push("");
+        continue;
+      }
+
+      const headingMatch = /^#{1,6}\s+(.*)/.exec(trimmed) || /^\*\*(.+?)\*\*\s*:?\s*$/.exec(trimmed);
+      if (headingMatch) {
+        const headingText = headingMatch[1];
+        const matched = sectionMatchers.find(m => m.regex.test(headingText));
+        if (matched) {
+          current = matched.key;
+          continue;
+        }
+      }
+
+      const inlineMatch = sectionMatchers.find(m => m.regex.test(trimmed));
+      if (inlineMatch) {
+        current = inlineMatch.key;
+        continue;
+      }
+
+      if (current) {
+        buckets[current].push(trimmed);
+      } else {
+        buckets.context.push(trimmed);
+      }
+    }
+
+    const toText = (arr: string[]) => arr.join("\n").trim() || undefined;
+    return {
+      looms: toText(buckets.looms),
+      meta: toText(buckets.meta),
+      steps: toText(buckets.steps),
+      actual: toText(buckets.actual),
+      expected: toText(buckets.expected),
+      workarounds: toText(buckets.workarounds),
+      production: toText(buckets.production),
+      context: toText(buckets.context),
+    };
+  }
+
   private listId: string;
   private apiToken: string;
   private apiBaseUrl: string;
@@ -296,4 +432,5 @@ export class ClickupApiImporter implements Importer {
   private maxIssues: number;
   private singleTaskId?: string;
   private fetchImpl: (url: string, init?: any) => Promise<any>;
+  private template: "bug" | "none";
 }
