@@ -30,6 +30,10 @@ inquirer.registerPrompt("filePath", require("inquirer-file-path"));
         message: "Which service would you like to import from?",
         choices: [
           {
+            name: "ClickUp (API)",
+            value: "clickup",
+          },
+          {
             name: "GitHub",
             value: "github",
           },
@@ -60,10 +64,6 @@ inquirer.registerPrompt("filePath", require("inquirer-file-path"));
           {
             name: "Linear (CSV export)",
             value: "linearCsv",
-          },
-          {
-            name: "ClickUp (API)",
-            value: "clickup",
           },
         ],
       },

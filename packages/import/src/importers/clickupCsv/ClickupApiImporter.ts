@@ -1,5 +1,6 @@
 import fetch from "node-fetch";
 import { Importer, ImportResult, IssuePriority } from "../../types";
+import type { Comment as LinearComment } from "../../types";
 
 type ClickupPriority = "urgent" | "high" | "normal" | "low" | null;
 
@@ -40,6 +41,21 @@ interface ClickupTask {
   due_date?: string;
 }
 
+interface ClickupComment {
+  id: string;
+  comment_text?: string;
+  date?: string;
+  user?: {
+    id?: number;
+    username?: string;
+    email?: string;
+  };
+}
+
+interface ClickupCommentsResponse {
+  comments: ClickupComment[];
+}
+
 interface ClickupTaskResponse {
   tasks: ClickupTask[];
 }
@@ -52,7 +68,7 @@ export interface ClickupImporterOptions {
   statusMapping?: Record<string, string>;
   maxIssues?: number;
   singleTaskId?: string;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: (url: string, init?: any) => Promise<any>;
 }
 
 /**
@@ -67,7 +83,7 @@ export class ClickupApiImporter implements Importer {
     this.statusMapping = options.statusMapping ?? {};
     this.maxIssues = options.maxIssues ?? 1;
     this.singleTaskId = options.singleTaskId;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = (options.fetchImpl ?? fetch) as (url: string, init?: any) => Promise<any>;
   }
 
   public get name(): string {
@@ -90,12 +106,17 @@ export class ClickupApiImporter implements Importer {
     for (const task of tasks) {
       const baseDescription = task.description || task.text_content || undefined;
       const originalUrl = task.url;
+      const comments = await this.fetchComments(task.id);
+      const commentsBlock = this.formatComments(comments);
+
       const description =
         originalUrl && baseDescription
           ? `${baseDescription}\n\n[View original task in ClickUp](${originalUrl})`
           : originalUrl
             ? `[View original task in ClickUp](${originalUrl})`
             : baseDescription;
+      const fullDescription =
+        commentsBlock && description ? `${description}\n\n---\n\n${commentsBlock}` : commentsBlock || description;
       const statusName = this.mapStatus(task.status?.status);
       const priority = this.mapPriority(task.priority?.priority);
 
@@ -133,7 +154,7 @@ export class ClickupApiImporter implements Importer {
 
       importData.issues.push({
         title: task.name,
-        description,
+        description: fullDescription,
         status: statusName,
         priority,
         url: originalUrl,
@@ -224,6 +245,49 @@ export class ClickupApiImporter implements Importer {
     return Number.isNaN(num) ? undefined : new Date(num);
   }
 
+  private async fetchComments(taskId: string): Promise<LinearComment[]> {
+    try {
+      const response = await this.fetchImpl(`${this.apiBaseUrl}/task/${taskId}/comment`, {
+        headers: {
+          Authorization: this.apiToken,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const data = (await response.json()) as ClickupCommentsResponse;
+      return (data.comments || []).map(comment => {
+        const userKey = (comment.user?.email || comment.user?.username || "").toLowerCase();
+        return {
+          body: comment.comment_text,
+          userId: userKey || "unknown",
+          createdAt: this.toDate(comment.date),
+        };
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  private formatComments(comments: LinearComment[]): string | undefined {
+    if (!comments.length) {
+      return undefined;
+    }
+    const sorted = [...comments].sort((a, b) => {
+      const aTime = a.createdAt ? a.createdAt.getTime() : 0;
+      const bTime = b.createdAt ? b.createdAt.getTime() : 0;
+      return aTime - bTime;
+    });
+    const blocks = sorted.map(comment => {
+      const date = comment.createdAt ? comment.createdAt.toISOString().split("T")[0] : "";
+      return `**${comment.userId || "Unknown"}** ${date}\n\n${comment.body ?? ""}`;
+    });
+    return `### ClickUp comments\n\n${blocks.join("\n\n---\n\n")}`;
+  }
+
   private listId: string;
   private apiToken: string;
   private apiBaseUrl: string;
@@ -231,5 +295,5 @@ export class ClickupApiImporter implements Importer {
   private statusMapping: Record<string, string>;
   private maxIssues: number;
   private singleTaskId?: string;
-  private fetchImpl: typeof fetch;
+  private fetchImpl: (url: string, init?: any) => Promise<any>;
 }

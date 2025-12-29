@@ -36,7 +36,25 @@ const testSingleTaskImport = async () => {
   };
 
   const mockFetch = async (url: string) => {
-    if (url.includes("/task/task-1")) {
+    if (typeof url === "string" && url.includes("/task/task-1/comment")) {
+      return makeResponse(200, {
+        comments: [
+          {
+            id: "c1",
+            comment_text: "First comment",
+            date: `1000`,
+            user: { email: "dev@example.com" },
+          },
+          {
+            id: "c2",
+            comment_text: "Second comment",
+            date: `2000`,
+            user: { email: "qa@example.com" },
+          },
+        ],
+      });
+    }
+    if (typeof url === "string" && url.includes("/task/task-1")) {
       return makeResponse(200, mockTask);
     }
     throw new Error(`Unexpected URL: ${url}`);
@@ -53,6 +71,12 @@ const testSingleTaskImport = async () => {
   assert.ok(issue.assigneeId?.includes("dev"), "assignee is mapped");
   assert.ok(issue.labels?.includes("bug"), "tag label included");
   assert.ok(issue.labels?.includes("BoardLabel"), "board label added");
+  const description = issue.description ?? "";
+  assert.ok(description.includes("ClickUp comments"), "comments header present");
+  assert.ok(
+    description.indexOf("First comment") < description.indexOf("Second comment"),
+    "comments sorted chronologically"
+  );
 };
 
 const testListImportWithLimit = async () => {
@@ -62,8 +86,11 @@ const testListImportWithLimit = async () => {
   ];
 
   const mockFetch = async (url: string) => {
-    if (url.includes("/list/123/task")) {
+    if (typeof url === "string" && url.includes("/list/123/task")) {
       return makeResponse(200, { tasks });
+    }
+    if (typeof url === "string" && url.includes("/comment")) {
+      return makeResponse(200, { comments: [] });
     }
     throw new Error(`Unexpected URL: ${url}`);
   };
