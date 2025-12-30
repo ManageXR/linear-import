@@ -2,6 +2,10 @@ export type IssuePriority = 0 | 1 | 2 | 3 | 4;
 
 /** Issue. */
 export interface Issue {
+  /** Optional external/source id for mapping (e.g., ClickUp task id). */
+  externalId?: string;
+  /** Optional external parent id for hierarchy mapping. */
+  parentExternalId?: string;
   /** Issue title */
   title: string;
   /** Description in markdown */

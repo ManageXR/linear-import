@@ -7,6 +7,7 @@ type ClickupPriority = "urgent" | "high" | "normal" | "low" | null;
 interface ClickupTask {
   id: string;
   name: string;
+  parent?: string;
   text_content?: string;
   description?: string;
   url?: string;
@@ -184,6 +185,8 @@ export class ClickupApiImporter implements Importer {
       }
 
       importData.issues.push({
+        externalId: task.id,
+        parentExternalId: task.parent,
         title: task.name,
         description: fullDescription,
         status: statusName,
@@ -216,7 +219,7 @@ export class ClickupApiImporter implements Importer {
     const params = new URLSearchParams();
     params.set("include_closed", "true");
     params.set("page", String(page));
-    params.set("subtasks", "false");
+    params.set("subtasks", "true");
     params.set("order_by", "created");
     params.set("reverse", "true");
     params.set("limit", String(Math.min(100, Math.max(1, limit))));

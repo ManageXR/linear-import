@@ -226,8 +226,12 @@ export const importIssues = async (apiKey: string, importer: Importer, apiUrl?: 
   issuesProgressBar.start(importData.issues.length, 0);
   let issueCursor = 0;
 
-  // Create issues
-  for (const issue of importData.issues) {
+  const sourceIdToLinearId: Record<string, string> = {};
+  const pendingIssues = [...importData.issues];
+
+  const debug = process.env.CLICKUP_DEBUG === "true";
+
+  const createIssueWithParent = async (issue: (typeof importData.issues)[number], parentId?: string) => {
     const issueDescription = issue.description
       ? await replaceImagesInMarkdown(client, issue.description, importData.resourceURLSuffix)
       : undefined;
@@ -250,7 +254,7 @@ export const importIssues = async (apiKey: string, importer: Importer, apiUrl?: 
       }
       const newStateResult = await client.createWorkflowState({
         name: issue.status,
-        teamId,
+        teamId: teamId as string,
         color: defaultStateColors[stateType],
         type: stateType,
       });
@@ -279,31 +283,94 @@ export const importIssues = async (apiKey: string, importer: Importer, apiUrl?: 
 
     const formattedDueDate = issue.dueDate ? format(issue.dueDate, "yyyy-MM-dd") : undefined;
 
-    try {
-      const createdIssue = await createIssueWithRetries(client, {
-        teamId,
-        projectId: projectId as unknown as string,
-        title: issue.title,
-        description,
-        priority: issue.priority,
-        labelIds,
-        stateId,
-        assigneeId,
-        createdAt: issue.createdAt,
-        completedAt: issue.completedAt,
-        dueDate: formattedDueDate,
-        estimate: issue.estimate,
-      });
+    const createdIssue = await createIssueWithRetries(client, {
+      teamId: teamId as string,
+      projectId: projectId as unknown as string,
+      title: issue.title,
+      description,
+      priority: issue.priority,
+      labelIds,
+      stateId,
+      assigneeId,
+      createdAt: issue.createdAt,
+      completedAt: issue.completedAt,
+      dueDate: formattedDueDate,
+      estimate: issue.estimate,
+      parentId,
+    });
 
-      if (issue.archived) {
-        await (await createdIssue.issue)?.archive();
+    if (issue.archived) {
+      await (await createdIssue.issue)?.archive();
+    }
+
+    issueCursor++;
+    issuesProgressBar.update(issueCursor);
+
+    return createdIssue;
+  };
+
+  // Create issues respecting parent-child relationships (option A: skip child if parent filtered out)
+  while (pendingIssues.length > 0) {
+    let madeProgress = false;
+
+    for (let i = 0; i < pendingIssues.length; i++) {
+      const issue = pendingIssues[i];
+      const parentExternalId = issue.parentExternalId;
+
+      if (parentExternalId) {
+        // If parent not yet created and not present in mapping or remaining list, skip this child
+        const parentLinearId = sourceIdToLinearId[parentExternalId];
+        const parentStillPending = pendingIssues.find(it => it.externalId === parentExternalId);
+
+        if (!parentLinearId && parentStillPending) {
+          continue; // wait for parent
+        }
+        if (!parentLinearId && !parentStillPending) {
+          // Parent filtered out or missing; skip child per option A
+          if (debug) {
+            console.info(
+              `[clickup] skipping subtask ${issue.externalId} because parent ${parentExternalId} not imported`
+            );
+          }
+          pendingIssues.splice(i, 1);
+          i--;
+          continue;
+        }
+
+        try {
+          const createdIssue = await createIssueWithParent(issue, parentLinearId);
+          if (issue.externalId) {
+            sourceIdToLinearId[issue.externalId] = (await createdIssue.issue)?.id as string;
+          }
+          pendingIssues.splice(i, 1);
+          i--;
+          madeProgress = true;
+        } catch (error) {
+          issuesProgressBar.stop();
+          throw error;
+        }
+      } else {
+        try {
+          const createdIssue = await createIssueWithParent(issue, undefined);
+          if (issue.externalId) {
+            sourceIdToLinearId[issue.externalId] = (await createdIssue.issue)?.id as string;
+          }
+          pendingIssues.splice(i, 1);
+          i--;
+          madeProgress = true;
+        } catch (error) {
+          issuesProgressBar.stop();
+          throw error;
+        }
       }
+    }
 
-      issueCursor++;
-      issuesProgressBar.update(issueCursor);
-    } catch (error) {
-      issuesProgressBar.stop();
-      throw error;
+    if (!madeProgress) {
+      // avoid infinite loop
+      if (debug) {
+        console.info(`[clickup] no progress creating issues; remaining: ${pendingIssues.length}`);
+      }
+      break;
     }
   }
 
