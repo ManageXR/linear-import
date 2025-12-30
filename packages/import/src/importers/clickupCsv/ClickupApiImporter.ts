@@ -104,11 +104,42 @@ export class ClickupApiImporter implements Importer {
       statuses: {},
     };
 
-    const tasks = await this.fetchTasks();
-    for (const task of tasks) {
+    const debug = process.env.CLICKUP_DEBUG === "true";
+    let page = 0;
+    const pageSize = Math.min(100, Math.max(1, this.maxIssues));
+    const tasksBuffer: ClickupTask[] = [];
+
+    while (importData.issues.length < this.maxIssues) {
+      if (tasksBuffer.length === 0) {
+        const pageTasks = await this.fetchTasks(page, pageSize);
+        if (debug) {
+          console.info(`[clickup] fetched page ${page} with ${pageTasks.length} tasks from list ${this.listId}`);
+        }
+        if (pageTasks.length === 0) {
+          break;
+        }
+        tasksBuffer.push(...pageTasks);
+        page += 1;
+      }
+
+      const task = tasksBuffer.shift();
+      if (!task) break;
+
       const baseDescription = task.description || task.text_content || undefined;
       const originalUrl = task.url;
       const comments = await this.fetchComments(task.id);
+      const rawStatus = task.status?.status?.toLowerCase();
+      // Only import if the status exists in the provided mapping
+      if (!rawStatus || !this.statusMapping[rawStatus]) {
+        if (debug) {
+          console.info(
+            `[clickup] skipping task ${task.id} - status '${rawStatus ?? "undefined"}' not in mapping keys: ${Object.keys(
+              this.statusMapping
+            ).join(", ")}`
+          );
+        }
+        continue;
+      }
       const statusName = this.mapStatus(task.status?.status);
       const priority = this.mapPriority(task.priority?.priority);
 
@@ -164,12 +195,19 @@ export class ClickupApiImporter implements Importer {
         completedAt: this.toDate(task.date_done || task.date_closed),
         dueDate: this.toDate(task.due_date),
       });
+
+      if (importData.issues.length >= this.maxIssues) {
+        break;
+      }
     }
 
+    if (debug) {
+      console.info(`[clickup] imported ${importData.issues.length} issues after filtering`);
+    }
     return importData;
   };
 
-  private async fetchTasks(): Promise<ClickupTask[]> {
+  private async fetchTasks(page: number, limit: number): Promise<ClickupTask[]> {
     if (this.singleTaskId) {
       const task = await this.fetchTaskById(this.singleTaskId);
       return task ? [task] : [];
@@ -177,11 +215,11 @@ export class ClickupApiImporter implements Importer {
 
     const params = new URLSearchParams();
     params.set("include_closed", "true");
-    params.set("page", "0");
+    params.set("page", String(page));
     params.set("subtasks", "false");
     params.set("order_by", "created");
     params.set("reverse", "true");
-    params.set("limit", String(this.maxIssues));
+    params.set("limit", String(Math.min(100, Math.max(1, limit))));
 
     const response = await this.fetchImpl(`${this.apiBaseUrl}/list/${this.listId}/task?${params.toString()}`, {
       headers: {

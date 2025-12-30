@@ -74,9 +74,9 @@ const questions = [
     name: "statusMapping",
     message:
       'Optional status mapping (JSON, e.g. {"todo":"Backlog","in progress":"Started"}). Leave blank to use ClickUp statuses as-is:',
-    default:
-      '{"triage":"Triage","reviewed":"Backlog","up next":"Up Next","in progress":"In Development","fix in next release":"Done","fixed":"Released"}',
+    default: '{"up next":"Up Next","in progress":"In Development","fix in next release":"Done"}',
   },
+  // "triage":"Triage","reviewed":"Backlog","fixed":"Released"
   {
     type: "confirm",
     name: "useBugTemplate",
