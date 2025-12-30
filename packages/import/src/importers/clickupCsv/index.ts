@@ -16,7 +16,7 @@ export const clickupImport = async (): Promise<Importer> => {
     statusMapping,
     maxIssues: answers.maxIssues ?? 1,
     singleTaskId: answers.singleTaskId || undefined,
-    template: answers.useBugTemplate ? "bug" : "none",
+    template: answers.templateChoice,
   };
 
   return new ClickupApiImporter(importerOptions);
@@ -30,7 +30,7 @@ interface ClickupImportAnswers {
   statusMapping: string;
   maxIssues?: number;
   singleTaskId?: string;
-  useBugTemplate: boolean;
+  templateChoice: "bug" | "product" | "none";
 }
 
 const questions = [
@@ -74,14 +74,23 @@ const questions = [
     name: "statusMapping",
     message:
       'Optional status mapping (JSON, e.g. {"todo":"Backlog","in progress":"Started"}). Leave blank to use ClickUp statuses as-is:',
-    default: '{"up next":"Up Next","in progress":"In Development","fix in next release":"Done"}',
+    default:
+      '{"ready":"Ready","up next":"Up Next","Development":"In Development","code review":"In Code Review","qa":"QA","done":"Done"}',
   },
-  // "triage":"Triage","reviewed":"Backlog","fixed":"Released"
+  // {"up next":"Up Next","in progress":"In Development","fix in next release":"Done"}
+  // {"ready":"Ready:,"up next":"Up Next","Development":"In Development","code review":"Code Review","qa":"QA","done":"Done"}
+  // '{"ready":"Ready","up next":"Up Next","Development":"In Development","code review":"In Code Review","qa":"QA","done":"Done"}',
+
   {
-    type: "confirm",
-    name: "useBugTemplate",
-    message: "Format description using the bug template?",
-    default: true,
+    type: "list",
+    name: "templateChoice",
+    message: "Select description template:",
+    choices: [
+      { name: "Bug", value: "bug" },
+      { name: "Product", value: "product" },
+      { name: "None (raw body + link + comments)", value: "none" },
+    ],
+    default: "bug",
   },
 ];
 

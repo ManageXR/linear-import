@@ -69,7 +69,7 @@ export interface ClickupImporterOptions {
   maxIssues?: number;
   singleTaskId?: string;
   fetchImpl?: (url: string, init?: any) => Promise<any>;
-  template?: "bug" | "none";
+  template?: "bug" | "product" | "none";
 }
 
 /**
@@ -341,6 +341,10 @@ export class ClickupApiImporter implements Importer {
       return this.renderBugTemplate({ body, originalUrl, comments, labels });
     }
 
+    if (this.template === "product") {
+      return this.renderProductTemplate({ body, originalUrl, comments });
+    }
+
     const description =
       originalUrl && body
         ? `${body}\n\n[View original task in ClickUp](${originalUrl})`
@@ -384,6 +388,39 @@ export class ClickupApiImporter implements Importer {
     ];
 
     return parts.join("\n\n\n");
+  }
+
+  private renderProductTemplate({
+    body,
+    originalUrl,
+    comments,
+  }: {
+    body?: string;
+    originalUrl?: string;
+    comments?: string;
+  }): string {
+    const parsed = this.parseBodyIntoProductSections(body || "");
+
+    const summaryLines: string[] = [];
+    if (parsed.summary) summaryLines.push(parsed.summary);
+    else if (body) summaryLines.push(body.trim());
+    if (originalUrl) summaryLines.push(`[View original task in ClickUp](${originalUrl})`);
+
+    const sections: { title: string; content?: string }[] = [
+      { title: "Summary", content: summaryLines.join("\n\n") || "" },
+      { title: "Screenshots / Looms", content: parsed.looms ?? "" },
+      { title: "QA Steps", content: parsed.qaSteps ?? "" },
+      { title: "Historical Context", content: parsed.history ?? "" },
+    ];
+
+    if (comments) {
+      sections.push({ title: "Context", content: comments });
+    }
+
+    const renderSection = (title: string, content?: string) =>
+      `# ${title}\n${content && content.trim().length ? content.trim() : ""}`.trimEnd();
+
+    return sections.map(s => renderSection(s.title, s.content)).join("\n\n\n");
   }
 
   private parseBodyIntoSections(body: string): {
@@ -462,6 +499,67 @@ export class ClickupApiImporter implements Importer {
     };
   }
 
+  private parseBodyIntoProductSections(body: string): {
+    summary?: string;
+    looms?: string;
+    qaSteps?: string;
+    history?: string;
+  } {
+    const buckets: Record<string, string[]> = {
+      summary: [],
+      looms: [],
+      qaSteps: [],
+      history: [],
+    };
+
+    const sectionMatchers: { key: keyof typeof buckets; regex: RegExp }[] = [
+      { key: "summary", regex: /summary/i },
+      { key: "looms", regex: /loom|screenshot|log/i },
+      { key: "qaSteps", regex: /qa steps|steps/i },
+      { key: "history", regex: /historical context|history|context/i },
+    ];
+
+    let current: keyof typeof buckets | null = null;
+    const lines = body.split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (current) buckets[current].push("");
+        continue;
+      }
+
+      const headingMatch = /^#{1,6}\s+(.*)/.exec(trimmed) || /^\*\*(.+?)\*\*\s*:?\s*$/.exec(trimmed);
+      if (headingMatch) {
+        const headingText = headingMatch[1];
+        const matched = sectionMatchers.find(m => m.regex.test(headingText));
+        if (matched) {
+          current = matched.key;
+          continue;
+        }
+      }
+
+      const inlineMatch = sectionMatchers.find(m => m.regex.test(trimmed));
+      if (inlineMatch) {
+        current = inlineMatch.key;
+        continue;
+      }
+
+      if (current) {
+        buckets[current].push(trimmed);
+      } else {
+        buckets.summary.push(trimmed);
+      }
+    }
+
+    const toText = (arr: string[]) => arr.join("\n").trim() || undefined;
+    return {
+      summary: toText(buckets.summary),
+      looms: toText(buckets.looms),
+      qaSteps: toText(buckets.qaSteps),
+      history: toText(buckets.history),
+    };
+  }
+
   private listId: string;
   private apiToken: string;
   private apiBaseUrl: string;
@@ -470,5 +568,5 @@ export class ClickupApiImporter implements Importer {
   private maxIssues: number;
   private singleTaskId?: string;
   private fetchImpl: (url: string, init?: any) => Promise<any>;
-  private template: "bug" | "none";
+  private template: "bug" | "product" | "none";
 }
